@@ -1025,9 +1025,11 @@ async function joinHousehold() {
 }
 
 async function enterHousehold(id, name, code) {
-  currentHousehold = { id, name, code };
-  document.getElementById('hname-display').textContent = name;
-  document.getElementById('hname-hist').textContent = name;
+  // Fetch fresh household data to ensure we have the invite code
+  const { data: fresh } = await sb.from('households').select('id,name,invite_code').eq('id', id).single();
+  currentHousehold = fresh || { id, name, code };
+  document.getElementById('hname-display').textContent = currentHousehold.name;
+  document.getElementById('hname-hist').textContent = currentHousehold.name;
   document.getElementById('household-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
   await fetchMembers();
@@ -1181,12 +1183,13 @@ async function setBudget(cat, val) {
 // INVITE
 // ════════════════════════════════
 function openInviteModal() {
-  document.getElementById('invite-code-display').textContent = currentHousehold?.code || '——';
+  const code = currentHousehold?.invite_code || currentHousehold?.code || '——';
+  document.getElementById('invite-code-display').textContent = code;
   document.getElementById('invite-modal').classList.add('open');
 }
 
 async function copyInviteCode() {
-  const code = currentHousehold?.code;
+  const code = currentHousehold?.invite_code || currentHousehold?.code;
   if (!code) return;
   try { await navigator.clipboard.writeText(code); showToast('📋 Code copied!'); }
   catch { showToast('Code: ' + code); }
