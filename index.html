@@ -764,7 +764,7 @@ body {
 
 <script>
 // ════════════════════════════════
-// CONFIG & STATE
+// v3 — full rewrite with all fixes
 // ════════════════════════════════
 const SQL_SCHEMA = `-- HomeSpend schema for Supabase
 
@@ -904,9 +904,13 @@ function startAuth() {
     if (session?.user) {
       currentUser = session.user;
       document.getElementById('auth-screen').style.display = 'none';
+      // Always go to households screen first — never skip to app
+      currentHousehold = null;
+      expenses = []; budgets = {}; members = [];
       await loadHouseholds();
     } else {
       currentUser = null;
+      currentHousehold = null;
       document.getElementById('auth-screen').style.display = 'flex';
       document.getElementById('household-screen').style.display = 'none';
       document.getElementById('app-screen').style.display = 'none';
@@ -960,23 +964,39 @@ async function doGoogleAuth() {
 // HOUSEHOLDS
 // ════════════════════════════════
 async function loadHouseholds() {
-  const { data, error } = await sb.from('household_members')
-    .select('household_id, households(id,name,invite_code)')
-    .eq('user_id', currentUser.id);
-
-  if (error) { showToast('Error loading households: ' + error.message); console.error(error); }
-  const hs = (data || []).map(r => r.households).filter(Boolean);
-  renderHouseholdList(hs);
+  // Always show household screen first
   document.getElementById('household-screen').style.display = 'block';
   document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'none';
 
-  // user bar
+  // Render user bar
   const meta = currentUser.user_metadata || {};
   const name = meta.display_name || meta.full_name || currentUser.email;
   document.getElementById('user-bar-hs').innerHTML = `
     <div class="user-avatar">${(name||'?')[0].toUpperCase()}</div>
     <div class="user-email">${currentUser.email}</div>
     <button class="btn-signout" onclick="signOut()">Sign out</button>`;
+
+  // Fetch households this user belongs to
+  const { data, error } = await sb
+    .from('household_members')
+    .select('household_id, households(id, name, invite_code)')
+    .eq('user_id', currentUser.id);
+
+  if (error) {
+    console.error('loadHouseholds error:', error);
+    showToast('Error: ' + error.message);
+    renderHouseholdList([]);
+    return;
+  }
+
+  const hs = (data || []).map(r => r.households).filter(Boolean);
+  renderHouseholdList(hs);
+
+  // If exactly one household and already entered before, auto-enter it
+  if (hs.length === 1 && currentHousehold && currentHousehold.id === hs[0].id) {
+    enterHousehold(hs[0].id, hs[0].name, hs[0].invite_code);
+  }
 }
 
 function renderHouseholdList(hs) {
