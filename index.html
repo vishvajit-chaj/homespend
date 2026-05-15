@@ -960,11 +960,12 @@ async function doGoogleAuth() {
 // HOUSEHOLDS
 // ════════════════════════════════
 async function loadHouseholds() {
-  const { data } = await sb.from('household_members')
+  const { data, error } = await sb.from('household_members')
     .select('household_id, households(id,name,invite_code)')
     .eq('user_id', currentUser.id);
 
-  const hs = (data || []).map(r => r.households);
+  if (error) { showToast('Error loading households: ' + error.message); console.error(error); }
+  const hs = (data || []).map(r => r.households).filter(Boolean);
   renderHouseholdList(hs);
   document.getElementById('household-screen').style.display = 'block';
   document.getElementById('app-screen').style.display = 'none';
@@ -973,7 +974,7 @@ async function loadHouseholds() {
   const meta = currentUser.user_metadata || {};
   const name = meta.display_name || meta.full_name || currentUser.email;
   document.getElementById('user-bar-hs').innerHTML = `
-    <div class="user-avatar">${name[0].toUpperCase()}</div>
+    <div class="user-avatar">${(name||'?')[0].toUpperCase()}</div>
     <div class="user-email">${currentUser.email}</div>
     <button class="btn-signout" onclick="signOut()">Sign out</button>`;
 }
@@ -999,10 +1000,11 @@ async function createHousehold() {
   const name = document.getElementById('new-hs-name').value.trim();
   if (!name) { showToast('Enter a household name'); return; }
   const { data: hs, error } = await sb.from('households').insert({ name, created_by: currentUser.id }).select().single();
-  if (error) { showToast(error.message); return; }
+  if (error) { showToast('Error: ' + error.message); console.error(error); return; }
   const meta = currentUser.user_metadata || {};
   const dn = meta.display_name || meta.full_name || currentUser.email.split('@')[0];
-  await sb.from('household_members').insert({ household_id: hs.id, user_id: currentUser.id, display_name: dn });
+  const { error: e2 } = await sb.from('household_members').insert({ household_id: hs.id, user_id: currentUser.id, display_name: dn });
+  if (e2) { showToast('Error joining: ' + e2.message); console.error(e2); return; }
   document.getElementById('new-hs-name').value = '';
   showToast('✅ Household created!');
   loadHouseholds();
@@ -1136,7 +1138,8 @@ async function submitExpense() {
   const dn = meta.display_name || meta.full_name || currentUser.email.split('@')[0];
 
   document.getElementById('add-btn').disabled = true;
-  const { error } = await sb.from('expenses').insert({
+  document.getElementById('add-btn').textContent = 'Saving…';
+  const { data: newExp, error } = await sb.from('expenses').insert({
     household_id: currentHousehold.id,
     user_id: currentUser.id,
     display_name: dn,
@@ -1144,16 +1147,24 @@ async function submitExpense() {
     description: desc,
     amount: amt,
     expense_date: date,
-  });
+  }).select().single();
   document.getElementById('add-btn').disabled = false;
-  if (error) { showToast(error.message); return; }
+  document.getElementById('add-btn').textContent = 'Add Expense';
+  if (error) { showToast('❌ ' + error.message); console.error(error); return; }
+  // Add to local state immediately (don't wait for realtime)
+  expenses.unshift(newExp);
   closeModal('add-modal');
+  buildMonthSelects();
+  renderAll();
   showToast('✅ Expense added');
 }
 
 async function deleteExpense(id) {
   const { error } = await sb.from('expenses').delete().eq('id', id);
-  if (error) showToast(error.message);
+  if (error) { showToast(error.message); return; }
+  expenses = expenses.filter(e => e.id !== id);
+  renderAll();
+  showToast('Deleted');
 }
 
 // ════════════════════════════════
